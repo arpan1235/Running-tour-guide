@@ -7,7 +7,7 @@ export function useTourGuide(settings) {
   const [error, setError] = useState(null);
 
   const audioRef = useRef(null);
-  const speechSynthRef = useRef(null);
+  const speakingTimeoutRef = useRef(null);
 
   /**
    * Generate commentary for current location
@@ -30,14 +30,12 @@ export function useTourGuide(settings) {
         })
       });
 
-      // Get response as text first to handle non-JSON responses
       const text = await response.text();
       let data;
       try {
         data = JSON.parse(text);
       } catch {
-        // Response isn't JSON - likely a 404 or server error page
-        throw new Error(`Server error (${response.status}): API endpoint not found. Redeploy may be needed.`);
+        throw new Error(`Server error (${response.status}): API endpoint not found.`);
       }
 
       if (!response.ok) {
@@ -54,15 +52,64 @@ export function useTourGuide(settings) {
   }, [isGenerating, settings.interests]);
 
   /**
+   * Use browser's built-in speech synthesis
+   */
+  const useBrowserTTS = useCallback((text) => {
+    if (!('speechSynthesis' in window)) {
+      setIsSpeaking(false);
+      return;
+    }
+
+    // Cancel any existing speech
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1.0;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      clearTimeout(speakingTimeoutRef.current);
+    };
+
+    utterance.onerror = (e) => {
+      console.error('Browser TTS error:', e);
+      setIsSpeaking(false);
+      clearTimeout(speakingTimeoutRef.current);
+    };
+
+    // Safety timeout - reset speaking state after 30 seconds max
+    speakingTimeoutRef.current = setTimeout(() => {
+      setIsSpeaking(false);
+      window.speechSynthesis.cancel();
+    }, 30000);
+
+    window.speechSynthesis.speak(utterance);
+  }, []);
+
+  /**
    * Speak text using OpenAI TTS or browser fallback
    */
   const speakText = useCallback(async (text) => {
-    // Stop any current speech
-    stopSpeaking();
+    // Stop any current speech first
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    clearTimeout(speakingTimeoutRef.current);
+
     setIsSpeaking(true);
 
+    // Safety timeout - always reset after 30 seconds
+    speakingTimeoutRef.current = setTimeout(() => {
+      setIsSpeaking(false);
+    }, 30000);
+
     try {
-      // Try OpenAI TTS first
       const response = await fetch('/api/speak', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -77,21 +124,40 @@ export function useTourGuide(settings) {
         const audioUrl = URL.createObjectURL(audioBlob);
 
         audioRef.current = new Audio(audioUrl);
+        audioRef.current.setAttribute('playsinline', 'true'); // iOS support
+
         audioRef.current.onended = () => {
           setIsSpeaking(false);
+          clearTimeout(speakingTimeoutRef.current);
           URL.revokeObjectURL(audioUrl);
+          audioRef.current = null;
         };
-        audioRef.current.onerror = () => {
-          setIsSpeaking(false);
+
+        audioRef.current.onerror = (e) => {
+          console.error('Audio playback error:', e);
+          URL.revokeObjectURL(audioUrl);
+          audioRef.current = null;
+          // Fallback to browser TTS
           if (settings.useBrowserTTS) {
             useBrowserTTS(text);
+          } else {
+            setIsSpeaking(false);
+            clearTimeout(speakingTimeoutRef.current);
           }
         };
-        await audioRef.current.play();
-        return;
+
+        try {
+          await audioRef.current.play();
+          return; // Success!
+        } catch (playError) {
+          console.error('Audio play failed:', playError);
+          URL.revokeObjectURL(audioUrl);
+          audioRef.current = null;
+          // Fall through to browser TTS
+        }
       }
     } catch (err) {
-      console.error('OpenAI TTS error:', err);
+      console.error('OpenAI TTS fetch error:', err);
     }
 
     // Fallback to browser TTS
@@ -99,32 +165,15 @@ export function useTourGuide(settings) {
       useBrowserTTS(text);
     } else {
       setIsSpeaking(false);
+      clearTimeout(speakingTimeoutRef.current);
     }
-  }, [settings.voice, settings.useBrowserTTS]);
-
-  /**
-   * Use browser's built-in speech synthesis
-   */
-  const useBrowserTTS = useCallback((text) => {
-    if (!('speechSynthesis' in window)) {
-      setIsSpeaking(false);
-      return;
-    }
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.1;
-    utterance.pitch = 1;
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
-
-    speechSynthRef.current = utterance;
-    window.speechSynthesis.speak(utterance);
-  }, []);
+  }, [settings.voice, settings.useBrowserTTS, useBrowserTTS]);
 
   /**
    * Stop current speech
    */
   const stopSpeaking = useCallback(() => {
+    clearTimeout(speakingTimeoutRef.current);
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current = null;

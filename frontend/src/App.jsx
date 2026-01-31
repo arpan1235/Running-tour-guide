@@ -24,17 +24,16 @@ function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState({
-    commentaryInterval: 30,
     voice: 'alloy',
     interests: ['landmarks', 'history', 'restaurants', 'local tips'],
     useBrowserTTS: true,
-    minDistanceForNewCommentary: 100 // meters before new commentary
+    minDistanceForNewCommentary: 100
   });
 
-  // Track state for smooth commentary flow
+  // Refs for tracking state without triggering re-renders
   const lastCommentaryLocationRef = useRef(null);
-  const pendingCommentaryRef = useRef(null);
-  const hasSpokenInitialRef = useRef(false);
+  const isProcessingRef = useRef(false);
+  const checkIntervalRef = useRef(null);
 
   const {
     location,
@@ -56,12 +55,20 @@ function App() {
     stopSpeaking
   } = useTourGuide(settings);
 
+  // Generate commentary for current location
+  const triggerCommentary = useCallback(() => {
+    if (!location || isProcessingRef.current || isGenerating) return;
+
+    isProcessingRef.current = true;
+    lastCommentaryLocationRef.current = { ...location };
+    generateCommentary(location, locationHistory);
+  }, [location, isGenerating, generateCommentary, locationHistory]);
+
   // Start the run
   const handleStartRun = useCallback(() => {
     setIsRunning(true);
-    hasSpokenInitialRef.current = false;
     lastCommentaryLocationRef.current = null;
-    pendingCommentaryRef.current = null;
+    isProcessingRef.current = false;
     startTracking();
   }, [startTracking]);
 
@@ -70,75 +77,74 @@ function App() {
     setIsRunning(false);
     stopTracking();
     stopSpeaking();
-    hasSpokenInitialRef.current = false;
+    if (checkIntervalRef.current) {
+      clearInterval(checkIntervalRef.current);
+      checkIntervalRef.current = null;
+    }
     lastCommentaryLocationRef.current = null;
+    isProcessingRef.current = false;
   }, [stopTracking, stopSpeaking]);
 
-  // Check if we should generate new commentary based on distance moved
-  const shouldGenerateCommentary = useCallback(() => {
-    if (!location || !isRunning) return false;
-    if (isGenerating || isSpeaking) return false;
-
-    // Always generate initial commentary
-    if (!hasSpokenInitialRef.current) {
-      return true;
-    }
-
-    // Check if we've moved enough distance
-    if (lastCommentaryLocationRef.current) {
-      const distanceMoved = getDistanceMeters(
-        lastCommentaryLocationRef.current.latitude,
-        lastCommentaryLocationRef.current.longitude,
-        location.latitude,
-        location.longitude
-      );
-      return distanceMoved >= settings.minDistanceForNewCommentary;
-    }
-
-    return false;
-  }, [location, isRunning, isGenerating, isSpeaking, settings.minDistanceForNewCommentary]);
-
-  // Main effect: Generate commentary when appropriate
+  // Initial commentary when run starts and location is available
   useEffect(() => {
-    if (!isRunning || !location) return;
-
-    if (shouldGenerateCommentary()) {
-      // Store this location as where we're generating commentary
-      lastCommentaryLocationRef.current = { ...location };
-      hasSpokenInitialRef.current = true;
-      generateCommentary(location, locationHistory);
+    if (isRunning && location && !lastCommentaryLocationRef.current && !isGenerating) {
+      triggerCommentary();
     }
-  }, [location?.latitude, location?.longitude, isRunning, shouldGenerateCommentary]);
+  }, [isRunning, location, isGenerating, triggerCommentary]);
 
-  // Speak commentary when it arrives (but only if not already speaking)
+  // Polling interval to check distance while running
   useEffect(() => {
-    if (!commentary || !isRunning) return;
+    if (!isRunning) return;
 
-    if (isSpeaking) {
-      // Queue this commentary to speak after current finishes
-      pendingCommentaryRef.current = commentary;
-    } else {
+    checkIntervalRef.current = setInterval(() => {
+      if (!location || isGenerating || isSpeaking || isProcessingRef.current) return;
+
+      if (lastCommentaryLocationRef.current) {
+        const distanceMoved = getDistanceMeters(
+          lastCommentaryLocationRef.current.latitude,
+          lastCommentaryLocationRef.current.longitude,
+          location.latitude,
+          location.longitude
+        );
+
+        if (distanceMoved >= settings.minDistanceForNewCommentary) {
+          triggerCommentary();
+        }
+      }
+    }, 3000); // Check every 3 seconds
+
+    return () => {
+      if (checkIntervalRef.current) {
+        clearInterval(checkIntervalRef.current);
+      }
+    };
+  }, [isRunning, location, isGenerating, isSpeaking, settings.minDistanceForNewCommentary, triggerCommentary]);
+
+  // Speak when new commentary arrives
+  useEffect(() => {
+    if (commentary && isRunning && !isSpeaking) {
       speakText(commentary.text);
-      pendingCommentaryRef.current = null;
+      // Reset processing flag after a short delay to allow next commentary
+      setTimeout(() => {
+        isProcessingRef.current = false;
+      }, 1000);
     }
-  }, [commentary?.timestamp]);
+  }, [commentary?.timestamp, isRunning, isSpeaking, speakText]);
 
-  // Handle queued commentary when speaking finishes
+  // Reset processing flag when speaking finishes
   useEffect(() => {
-    if (!isSpeaking && pendingCommentaryRef.current && isRunning) {
-      const pending = pendingCommentaryRef.current;
-      pendingCommentaryRef.current = null;
-      speakText(pending.text);
+    if (!isSpeaking && !isGenerating) {
+      isProcessingRef.current = false;
     }
-  }, [isSpeaking, isRunning]);
+  }, [isSpeaking, isGenerating]);
 
-  // Manual skip - force new commentary
+  // Manual skip
   const handleSkip = useCallback(() => {
     if (!location || isGenerating) return;
     stopSpeaking();
-    lastCommentaryLocationRef.current = { ...location };
-    generateCommentary(location, locationHistory);
-  }, [location, isGenerating, stopSpeaking, generateCommentary, locationHistory]);
+    isProcessingRef.current = false;
+    setTimeout(() => triggerCommentary(), 100);
+  }, [location, isGenerating, stopSpeaking, triggerCommentary]);
 
   const error = locationError || tourError;
 
