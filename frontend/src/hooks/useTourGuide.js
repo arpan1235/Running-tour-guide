@@ -30,7 +30,15 @@ export function useTourGuide(settings) {
         })
       });
 
-      const data = await response.json();
+      // Get response as text first to handle non-JSON responses
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        // Response isn't JSON - likely a 404 or server error page
+        throw new Error(`Server error (${response.status}): API endpoint not found. Redeploy may be needed.`);
+      }
 
       if (!response.ok) {
         throw new Error(data.error || `API error: ${response.status}`);
@@ -39,7 +47,7 @@ export function useTourGuide(settings) {
       setCommentary(data);
     } catch (err) {
       console.error('Commentary generation error:', err);
-      setError(err.message || 'Could not generate tour commentary. Check your connection.');
+      setError(err.message || 'Could not generate tour commentary.');
     } finally {
       setIsGenerating(false);
     }
