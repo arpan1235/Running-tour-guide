@@ -1,7 +1,7 @@
 import React from 'react';
 import './RunningControls.css';
 
-function RunningControls({ isRunning, onStart, onStop, onSkip, isGenerating }) {
+function RunningControls({ isRunning, onStart, onStop, onSkip, isGenerating, isSpeaking }) {
   return (
     <div className="running-controls">
       {!isRunning ? (
@@ -15,7 +15,7 @@ function RunningControls({ isRunning, onStart, onStop, onSkip, isGenerating }) {
             className="skip-btn"
             onClick={onSkip}
             disabled={isGenerating}
-            title="Get new commentary"
+            title={isSpeaking ? "Skip current" : "Get new commentary"}
           >
             <SkipIcon />
           </button>

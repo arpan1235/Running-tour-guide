@@ -45,19 +45,19 @@ function SettingsPanel({ settings, onSettingsChange, onClose }) {
 
         <div className="settings-content">
           <div className="setting-group">
-            <label>Commentary Interval</label>
+            <label>Distance Between Updates</label>
             <div className="interval-slider">
               <input
                 type="range"
-                min="15"
-                max="120"
-                step="15"
-                value={settings.commentaryInterval}
-                onChange={e => updateSetting('commentaryInterval', parseInt(e.target.value))}
+                min="50"
+                max="300"
+                step="50"
+                value={settings.minDistanceForNewCommentary || 100}
+                onChange={e => updateSetting('minDistanceForNewCommentary', parseInt(e.target.value))}
               />
-              <span>{settings.commentaryInterval}s</span>
+              <span>{settings.minDistanceForNewCommentary || 100}m</span>
             </div>
-            <p className="setting-hint">How often you hear new commentary</p>
+            <p className="setting-hint">How far to run before hearing new info</p>
           </div>
 
           <div className="setting-group">

@@ -7,15 +7,34 @@ import { useGeolocation } from './hooks/useGeolocation';
 import { useTourGuide } from './hooks/useTourGuide';
 import './App.css';
 
+// Calculate distance between two coordinates in meters
+function getDistanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371e3;
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState({
-    commentaryInterval: 30, // seconds between commentary
+    commentaryInterval: 30,
     voice: 'alloy',
     interests: ['landmarks', 'history', 'restaurants', 'local tips'],
-    useBrowserTTS: true // fallback to browser TTS if API fails
+    useBrowserTTS: true,
+    minDistanceForNewCommentary: 100 // meters before new commentary
   });
+
+  // Track state for smooth commentary flow
+  const lastCommentaryLocationRef = useRef(null);
+  const pendingCommentaryRef = useRef(null);
+  const hasSpokenInitialRef = useRef(false);
 
   const {
     location,
@@ -37,41 +56,89 @@ function App() {
     stopSpeaking
   } = useTourGuide(settings);
 
-  // Start/stop the run
+  // Start the run
   const handleStartRun = useCallback(() => {
     setIsRunning(true);
+    hasSpokenInitialRef.current = false;
+    lastCommentaryLocationRef.current = null;
+    pendingCommentaryRef.current = null;
     startTracking();
   }, [startTracking]);
 
+  // Stop the run
   const handleStopRun = useCallback(() => {
     setIsRunning(false);
     stopTracking();
     stopSpeaking();
+    hasSpokenInitialRef.current = false;
+    lastCommentaryLocationRef.current = null;
   }, [stopTracking, stopSpeaking]);
 
-  // Generate commentary at intervals while running
+  // Check if we should generate new commentary based on distance moved
+  const shouldGenerateCommentary = useCallback(() => {
+    if (!location || !isRunning) return false;
+    if (isGenerating || isSpeaking) return false;
+
+    // Always generate initial commentary
+    if (!hasSpokenInitialRef.current) {
+      return true;
+    }
+
+    // Check if we've moved enough distance
+    if (lastCommentaryLocationRef.current) {
+      const distanceMoved = getDistanceMeters(
+        lastCommentaryLocationRef.current.latitude,
+        lastCommentaryLocationRef.current.longitude,
+        location.latitude,
+        location.longitude
+      );
+      return distanceMoved >= settings.minDistanceForNewCommentary;
+    }
+
+    return false;
+  }, [location, isRunning, isGenerating, isSpeaking, settings.minDistanceForNewCommentary]);
+
+  // Main effect: Generate commentary when appropriate
   useEffect(() => {
     if (!isRunning || !location) return;
 
-    // Generate initial commentary
-    generateCommentary(location, locationHistory);
+    if (shouldGenerateCommentary()) {
+      // Store this location as where we're generating commentary
+      lastCommentaryLocationRef.current = { ...location };
+      hasSpokenInitialRef.current = true;
+      generateCommentary(location, locationHistory);
+    }
+  }, [location?.latitude, location?.longitude, isRunning, shouldGenerateCommentary]);
 
-    // Set up interval for periodic commentary
-    const interval = setInterval(() => {
-      if (location && !isGenerating && !isSpeaking) {
-        generateCommentary(location, locationHistory);
-      }
-    }, settings.commentaryInterval * 1000);
-
-    return () => clearInterval(interval);
-  }, [isRunning, location?.latitude, location?.longitude, settings.commentaryInterval]);
-
-  // Auto-speak new commentary
+  // Speak commentary when it arrives (but only if not already speaking)
   useEffect(() => {
-    if (commentary && isRunning) {
+    if (!commentary || !isRunning) return;
+
+    if (isSpeaking) {
+      // Queue this commentary to speak after current finishes
+      pendingCommentaryRef.current = commentary;
+    } else {
       speakText(commentary.text);
+      pendingCommentaryRef.current = null;
     }
   }, [commentary?.timestamp]);
+
+  // Handle queued commentary when speaking finishes
+  useEffect(() => {
+    if (!isSpeaking && pendingCommentaryRef.current && isRunning) {
+      const pending = pendingCommentaryRef.current;
+      pendingCommentaryRef.current = null;
+      speakText(pending.text);
+    }
+  }, [isSpeaking, isRunning]);
+
+  // Manual skip - force new commentary
+  const handleSkip = useCallback(() => {
+    if (!location || isGenerating) return;
+    stopSpeaking();
+    lastCommentaryLocationRef.current = { ...location };
+    generateCommentary(location, locationHistory);
+  }, [location, isGenerating, stopSpeaking, generateCommentary, locationHistory]);
 
   const error = locationError || tourError;
 
@@ -113,8 +180,9 @@ function App() {
           isRunning={isRunning}
           onStart={handleStartRun}
           onStop={handleStopRun}
-          onSkip={() => location && generateCommentary(location, locationHistory)}
+          onSkip={handleSkip}
           isGenerating={isGenerating}
+          isSpeaking={isSpeaking}
         />
       </main>
 
