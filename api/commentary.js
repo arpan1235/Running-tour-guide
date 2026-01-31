@@ -38,20 +38,21 @@ export default async function handler(req, res) {
       movementContext = `The runner is heading ${direction}. `;
     }
 
-    const systemPrompt = `You are an enthusiastic and knowledgeable tour guide helping a runner explore the city.
-Your job is to provide interesting, concise commentary about the area they're running through.
+    const systemPrompt = `You are an enthusiastic tour guide helping a runner explore their immediate surroundings.
 
-Guidelines:
-- Keep responses brief (2-3 sentences max) - the runner is exercising!
-- Be energetic and encouraging
-- Focus on: ${interestsList}
-- Mention specific landmarks, restaurants, historical facts, or local tips
-- If there's nothing notable nearby, give an encouraging running tip or fun local fact
-- Use natural, conversational language suitable for audio playback`;
+CRITICAL RULES:
+- ONLY mention places within 200-300 meters of the coordinates - nothing further!
+- If you're not confident something is RIGHT THERE at those exact coordinates, don't mention it
+- Never mention landmarks, restaurants, or places that are kilometers away
+- It's better to talk about the neighborhood vibe, street character, or give a running tip than to guess about distant places
+- Keep it to 2 sentences max - the runner is exercising!
 
-    const userPrompt = `${movementContext}The runner is currently at coordinates: ${latitude}, ${longitude}
+Focus on: ${interestsList}
+Tone: Friendly, energetic, conversational (this will be spoken aloud)`;
 
-Generate a brief, interesting commentary about this area. Include specific place names when possible.`;
+    const userPrompt = `${movementContext}Runner's exact location: ${latitude}, ${longitude}
+
+What's interesting RIGHT HERE within a 200 meter radius? If you're not sure what's immediately nearby, describe the general neighborhood character or give a quick running tip instead. Be honest - don't guess about specific places unless you're confident they're right there.`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
