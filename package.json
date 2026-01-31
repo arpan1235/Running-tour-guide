@@ -1,0 +1,18 @@
+{
+  "name": "running-tour-guide",
+  "version": "1.0.0",
+  "description": "An app that gives you a tour of surrounding attractions as you run through the city",
+  "scripts": {
+    "install:all": "npm install && cd frontend && npm install && cd ../backend && npm install",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "start": "cd backend && npm start"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "keywords": ["running", "tour", "guide", "llm", "audio", "location"],
+  "license": "MIT"
+}
