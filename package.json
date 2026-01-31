@@ -10,6 +10,9 @@
     "build": "cd frontend && npm run build",
     "start": "cd backend && npm start"
   },
+  "dependencies": {
+    "openai": "^4.28.0"
+  },
   "devDependencies": {
     "concurrently": "^8.2.2"
   },
