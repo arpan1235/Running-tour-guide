@@ -14,11 +14,24 @@ An app that gives you a real-time audio tour of surrounding attractions as you r
 ## Tech Stack
 
 - **Frontend**: React + Vite
-- **Backend**: Node.js + Express
+- **Backend**: Vercel Serverless Functions
 - **AI**: OpenAI GPT-4o-mini for commentary, OpenAI TTS for audio
 - **Location**: Browser Geolocation API
 
-## Getting Started
+## Deploy to Vercel (Recommended)
+
+The easiest way to use this app - deploy to Vercel and access from your phone!
+
+1. Fork this repository to your GitHub account
+2. Go to [vercel.com](https://vercel.com) and sign in with GitHub
+3. Click "New Project" and import your forked repo
+4. Add your environment variable:
+   - Name: `OPENAI_API_KEY`
+   - Value: Your OpenAI API key
+5. Click "Deploy"
+6. Open the deployed URL on your phone and start running!
+
+## Local Development
 
 ### Prerequisites
 
@@ -64,9 +77,8 @@ An app that gives you a real-time audio tour of surrounding attractions as you r
 
 ## API Endpoints
 
-- `POST /api/tour/commentary` - Generate tour commentary for a location
-- `POST /api/tour/nearby` - Get nearby points of interest
-- `POST /api/tour/speak` - Convert text to speech audio
+- `POST /api/commentary` - Generate tour commentary for a location
+- `POST /api/speak` - Convert text to speech audio
 
 ## Environment Variables
 

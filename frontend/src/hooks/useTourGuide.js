@@ -19,7 +19,7 @@ export function useTourGuide(settings) {
     setError(null);
 
     try {
-      const response = await fetch('/api/tour/commentary', {
+      const response = await fetch('/api/commentary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -54,7 +54,7 @@ export function useTourGuide(settings) {
 
     try {
       // Try OpenAI TTS first
-      const response = await fetch('/api/tour/speak', {
+      const response = await fetch('/api/speak', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
