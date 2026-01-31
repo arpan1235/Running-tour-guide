@@ -4,6 +4,73 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+// Fetch nearby places from OpenStreetMap using Overpass API
+async function getNearbyPlaces(lat, lon, radiusMeters = 150) {
+  const query = `
+    [out:json][timeout:10];
+    (
+      node["amenity"~"restaurant|cafe|bar|pub|fast_food|ice_cream|bakery"](around:${radiusMeters},${lat},${lon});
+      node["tourism"~"museum|gallery|artwork|attraction|viewpoint|monument|memorial"](around:${radiusMeters},${lat},${lon});
+      node["historic"](around:${radiusMeters},${lat},${lon});
+      node["leisure"~"park|garden|playground"](around:${radiusMeters},${lat},${lon});
+      node["shop"~"books|clothes|gift|mall"](around:${radiusMeters},${lat},${lon});
+      way["tourism"~"museum|gallery|attraction"](around:${radiusMeters},${lat},${lon});
+      way["historic"](around:${radiusMeters},${lat},${lon});
+      way["leisure"~"park|garden"](around:${radiusMeters},${lat},${lon});
+      way["building"~"church|cathedral|mosque|temple|synagogue"](around:${radiusMeters},${lat},${lon});
+    );
+    out body center 10;
+  `;
+
+  try {
+    const response = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `data=${encodeURIComponent(query)}`
+    });
+
+    if (!response.ok) return [];
+
+    const data = await response.json();
+
+    // Extract place names and types
+    return data.elements
+      .filter(el => el.tags && el.tags.name)
+      .map(el => ({
+        name: el.tags.name,
+        type: el.tags.amenity || el.tags.tourism || el.tags.historic || el.tags.leisure || el.tags.shop || el.tags.building || 'place',
+        cuisine: el.tags.cuisine || null,
+        description: el.tags.description || null
+      }))
+      .slice(0, 8); // Limit to 8 places
+  } catch (error) {
+    console.error('Overpass API error:', error);
+    return [];
+  }
+}
+
+// Reverse geocode to get street/neighborhood name
+async function getLocationName(lat, lon) {
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18`,
+      { headers: { 'User-Agent': 'RunningTourGuide/1.0' } }
+    );
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    return {
+      street: data.address?.road || data.address?.pedestrian || data.address?.footway,
+      neighborhood: data.address?.neighbourhood || data.address?.suburb || data.address?.quarter,
+      city: data.address?.city || data.address?.town || data.address?.village
+    };
+  } catch (error) {
+    console.error('Nominatim error:', error);
+    return null;
+  }
+}
+
 function getDirection(lat1, lon1, lat2, lon2) {
   const dLat = lat2 - lat1;
   const dLon = lon2 - lon1;
@@ -29,6 +96,12 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Latitude and longitude are required' });
     }
 
+    // Fetch real data from OpenStreetMap
+    const [nearbyPlaces, locationInfo] = await Promise.all([
+      getNearbyPlaces(latitude, longitude, 150),
+      getLocationName(latitude, longitude)
+    ]);
+
     const interestsList = interests.join(', ');
 
     let movementContext = '';
@@ -38,21 +111,40 @@ export default async function handler(req, res) {
       movementContext = `The runner is heading ${direction}. `;
     }
 
-    const systemPrompt = `You are an enthusiastic tour guide helping a runner explore their immediate surroundings.
+    // Build location context
+    let locationContext = '';
+    if (locationInfo) {
+      const parts = [locationInfo.street, locationInfo.neighborhood, locationInfo.city].filter(Boolean);
+      if (parts.length > 0) {
+        locationContext = `Current location: ${parts.join(', ')}. `;
+      }
+    }
 
-CRITICAL RULES:
-- ONLY mention places within 200-300 meters of the coordinates - nothing further!
-- If you're not confident something is RIGHT THERE at those exact coordinates, don't mention it
-- Never mention landmarks, restaurants, or places that are kilometers away
-- It's better to talk about the neighborhood vibe, street character, or give a running tip than to guess about distant places
-- Keep it to 2 sentences max - the runner is exercising!
+    // Build places context
+    let placesContext = '';
+    if (nearbyPlaces.length > 0) {
+      const placesList = nearbyPlaces.map(p => {
+        let desc = `${p.name} (${p.type})`;
+        if (p.cuisine) desc += ` - ${p.cuisine}`;
+        return desc;
+      }).join('; ');
+      placesContext = `\n\nNEARBY PLACES WITHIN 150 METERS:\n${placesList}`;
+    } else {
+      placesContext = '\n\nNo specific places of interest found within 150 meters.';
+    }
 
-Focus on: ${interestsList}
-Tone: Friendly, energetic, conversational (this will be spoken aloud)`;
+    const systemPrompt = `You are an enthusiastic tour guide helping a runner explore their city.
 
-    const userPrompt = `${movementContext}Runner's exact location: ${latitude}, ${longitude}
+RULES:
+- Keep it to 2 sentences max - they're running!
+- ONLY mention places from the NEARBY PLACES list provided - these are real and verified nearby
+- If no places are listed, comment on the neighborhood vibe or give a running tip
+- Be conversational and energetic (this will be spoken aloud)
+- Focus on: ${interestsList}`;
 
-What's interesting RIGHT HERE within a 200 meter radius? If you're not sure what's immediately nearby, describe the general neighborhood character or give a quick running tip instead. Be honest - don't guess about specific places unless you're confident they're right there.`;
+    const userPrompt = `${movementContext}${locationContext}${placesContext}
+
+Generate a brief, friendly audio commentary for the runner. Only mention places from the list above - they're confirmed to be right here!`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -60,7 +152,7 @@ What's interesting RIGHT HERE within a 200 meter radius? If you're not sure what
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ],
-      max_tokens: 200,
+      max_tokens: 150,
       temperature: 0.8
     });
 
@@ -69,12 +161,12 @@ What's interesting RIGHT HERE within a 200 meter radius? If you're not sure what
     res.json({
       text: commentary,
       location: { latitude, longitude },
+      nearbyPlaces: nearbyPlaces.length,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('Commentary error:', error);
 
-    // Provide specific error messages
     if (error.code === 'invalid_api_key') {
       return res.status(401).json({ error: 'Invalid OpenAI API key. Check your key in Vercel settings.' });
     }
