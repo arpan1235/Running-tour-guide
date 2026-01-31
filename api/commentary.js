@@ -18,6 +18,10 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  if (!process.env.OPENAI_API_KEY) {
+    return res.status(500).json({ error: 'OpenAI API key not configured. Add OPENAI_API_KEY in Vercel settings.' });
+  }
+
   try {
     const { latitude, longitude, previousLocations = [], interests = ['landmarks', 'history', 'restaurants', 'local tips'] } = req.body;
 
@@ -68,6 +72,15 @@ Generate a brief, interesting commentary about this area. Include specific place
     });
   } catch (error) {
     console.error('Commentary error:', error);
-    res.status(500).json({ error: 'Failed to generate commentary' });
+
+    // Provide specific error messages
+    if (error.code === 'invalid_api_key') {
+      return res.status(401).json({ error: 'Invalid OpenAI API key. Check your key in Vercel settings.' });
+    }
+    if (error.code === 'insufficient_quota') {
+      return res.status(402).json({ error: 'OpenAI quota exceeded. Check your billing at platform.openai.com' });
+    }
+
+    res.status(500).json({ error: error.message || 'Failed to generate commentary' });
   }
 }

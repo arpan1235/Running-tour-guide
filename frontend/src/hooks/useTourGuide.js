@@ -30,15 +30,16 @@ export function useTourGuide(settings) {
         })
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error('Failed to generate commentary');
+        throw new Error(data.error || `API error: ${response.status}`);
       }
 
-      const data = await response.json();
       setCommentary(data);
     } catch (err) {
       console.error('Commentary generation error:', err);
-      setError('Could not generate tour commentary. Check your connection.');
+      setError(err.message || 'Could not generate tour commentary. Check your connection.');
     } finally {
       setIsGenerating(false);
     }
